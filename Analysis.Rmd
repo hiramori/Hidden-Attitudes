@@ -20,7 +20,7 @@ R code for a paper tentatively titled “Hidden Attitudes? Reassessing Support f
 
 ```{r}
 #penalize excessive significant figures
-options(digits = 5)
+options(digits = 3)
 
 #prevent scientific notation
 options(scipen = 10)
@@ -75,15 +75,15 @@ data <- data %>%
 data %>%
   group_by(group) %>%
   summarise(
-    mean_q9_1fa = mean(q9_1fa, na.rm = TRUE),
+    mean = mean(q9_1fa, na.rm = TRUE),
     sd = sd(q9_1fa, na.rm = TRUE),
     n = n()
     )
 
 diff <- data %>%
   group_by(group) %>%
-  summarise(mean_q9_1fa = mean(q9_1fa, na.rm = TRUE)) %>%
-  pivot_wider(names_from = group, values_from = mean_q9_1fa) %>%
+  summarise(mean = mean(q9_1fa, na.rm = TRUE)) %>%
+  pivot_wider(names_from = group, values_from = mean) %>%
   mutate(diff = (`treatment` - `control`) * 100)
 diff <- diff[[3]]
 ```
@@ -101,4 +101,4 @@ average <- avr[[2, 2]]
 
 結果2：リスト実験で同性婚賛否の設問を見なかった4問群（統制群）において、直接同性婚の賛否を聞いた場合の同性婚賛成割合は`r round(average, 3)`%である。
 
-結果3：直接聞いた場合と間接的に聞いた場合では、`r round(average-diff, 3)`%差がある（実際よりも賛成割合が過大推定されている）。
+**結果3：直接聞いた場合と間接的に聞いた場合では、`r round(average-diff, 3)`%差がある（実際よりも賛成割合が過大推定されている）。**
