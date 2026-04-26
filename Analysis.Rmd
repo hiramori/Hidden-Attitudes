@@ -1,0 +1,104 @@
+---
+title: "Analysis for the 'Hidden Attitudes' paper"
+author: "Daiki Hiramori and Kairi Shimabukuro"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+    pdf_document:
+        latex_engine: xelatex
+geometry: margin = 1in
+mainfont: Times New Roman
+fontsize: 11pt
+header-includes:
+  - \usepackage{xltxtra}
+  - \usepackage{zxjatype}
+  - \usepackage[hiragino-pron]{zxjafont}
+---
+
+R code for a paper tentatively titled “Hidden Attitudes? Reassessing Support for Same-Sex Marriage in Japan through a List Experiment”
+
+# Initial Data Analysis
+
+```{r}
+#penalize excessive significant figures
+options(digits = 5)
+
+#prevent scientific notation
+options(scipen = 10)
+
+#packages used in this analysis
+library(tidyverse)
+```
+
+```{r}
+#import raw data
+data <- read_csv("data/rawdata.csv", locale = locale(encoding = "CP932"), show_col_types = FALSE)
+```
+
+```{r}
+#recode variables
+#treatment group vs. control group
+table(data$cellname)
+table(data$cid)
+
+data <- data %>%
+  mutate(group = case_when(
+    cid >= 1  & cid <= 10 ~ 1,
+    cid >= 11 & cid <= 20 ~ 2,
+    TRUE ~ NA_real_
+  ))
+
+#direct question
+table(data$q10)
+data <- data %>%
+  mutate(direct = recode(q10,
+                         `1` = 1,
+                         `2` = 0,
+                         .default = NA_real_))
+table(data$q10, data$direct)
+
+#rename group
+data <- data %>%
+  mutate(group = factor(group,
+                        levels = c(1, 2),
+                        labels = c("treatment", "control")))
+
+round(prop.table(table(data$cid, data$group), margin = 1) * 100, 1)
+
+#delete satisficers
+data <- data %>%
+  filter(q7_5 == 2)
+```
+
+```{r}
+#compare the means of the selected items
+
+data %>%
+  group_by(group) %>%
+  summarise(
+    mean_q9_1fa = mean(q9_1fa, na.rm = TRUE),
+    sd = sd(q9_1fa, na.rm = TRUE),
+    n = n()
+    )
+
+diff <- data %>%
+  group_by(group) %>%
+  summarise(mean_q9_1fa = mean(q9_1fa, na.rm = TRUE)) %>%
+  pivot_wider(names_from = group, values_from = mean_q9_1fa) %>%
+  mutate(diff = (`treatment` - `control`) * 100)
+diff <- diff[[3]]
+```
+
+結果1：5問群（実験群）と4問群（統制群）の差から計算した「実際の」同性婚賛成割合は、`r round(diff, 3)`% である。
+
+```{r}
+avr <- data %>%
+  group_by(group) %>%
+  summarise(mean_direct = mean(direct, na.rm = TRUE)*100)
+pull(avr)
+
+average <- avr[[2, 2]]
+```
+
+結果2：リスト実験で同性婚賛否の設問を見なかった4問群（統制群）において、直接同性婚の賛否を聞いた場合の同性婚賛成割合は`r round(average, 3)`%である。
+
+結果3：直接聞いた場合と間接的に聞いた場合では、`r round(average-diff, 3)`%差がある（実際よりも賛成割合が過大推定されている）。
