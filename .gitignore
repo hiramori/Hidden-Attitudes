@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.positai
+
+#specific paths
+/data
+/doc
+/figure
+
+#specific file types
+*.pdf
