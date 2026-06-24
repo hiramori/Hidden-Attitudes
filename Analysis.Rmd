@@ -31,7 +31,8 @@ library(tidyverse)
 
 ```{r}
 #import raw data
-data <- read_csv("data/rawdata.csv", locale = locale(encoding = "CP932"), show_col_types = FALSE)
+data <- read_csv("data/rawdata.csv", locale = locale(encoding = "CP932"),
+                 show_col_types = FALSE)
 ```
 
 ```{r}
@@ -65,6 +66,8 @@ data <- data %>%
 round(prop.table(table(data$cid, data$group), margin = 1) * 100, 1)
 
 #delete satisficers
+table(data$q7_5)
+100*prop.table(table(data$q7_5))
 data <- data %>%
   filter(q7_5 == 2)
 ```
@@ -102,3 +105,136 @@ average <- avr[[2, 2]]
 結果2：リスト実験で同性婚賛否の設問を見なかった4問群（統制群）において、直接同性婚の賛否を聞いた場合の同性婚賛成割合は`r round(average, 3)`%である。
 
 **結果3：直接聞いた場合と間接的に聞いた場合では、`r round(average-diff, 3)`%差がある（実際よりも賛成割合が過大推定されている）。**
+
+# Main Data Analysis
+
+```{r}
+#packages used in this analysis
+library(list)
+
+#recode the group variable
+data <- data %>%
+  mutate(treat = case_when(
+    group == "control" ~ 0,
+    group == "treatment" ~ 1
+  ))
+
+data <- as.data.frame(data)
+```
+
+```{r}
+# Direct question estimate
+data <- data %>%
+  mutate(direct_support = case_when(
+    q10 == 1 ~ 1, 
+    q10 == 2 ~ 0,   
+    TRUE ~ NA_real_
+  ))
+
+direct_est <- mean(data$direct_support, na.rm = TRUE)
+direct_n   <- sum(!is.na(data$direct_support))
+direct_se  <- sqrt(direct_est * (1 - direct_est) / direct_n)
+
+cat("Direct estimate:", round(direct_est, 4), 
+    "SE:", round(direct_se, 4), 
+    "N:", direct_n, "\n")
+```
+
+```{r}
+# Check No Design Effects Assumption
+ict.test(y = data$q9_1fa, treat = data$treat, J = 4)
+
+# Check Ceiling and Floor Effects
+table(data$q9_1fa[data$treat == 0])
+100*prop.table(table(data$q9_1fa[data$treat == 0]) )
+table(data$q9_1fa[data$treat == 1])
+100*prop.table(table(data$q9_1fa[data$treat == 1]))
+
+nls_fit <- ictreg(q9_1fa ~ 1, data = data, treat = "treat", J = 4, method = "nls")
+summary(nls_fit)
+```
+
+```{r}
+# Calculate list experiment difference in means
+diff.in.means.results <- ictreg(q9_1fa ~ 1, data = data, 
+                  treat = "treat", J=4, method = "lm")
+
+summary(diff.in.means.results)
+```
+
+```{r}
+# Setup: fit base models on full sample
+fit.list <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
+                    treat = "treat", J = 4, method = "ml")
+
+fit.ceiling <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
+                    treat = "treat", J = 4, method = "ml", ceiling = TRUE)
+
+fit.sens <- glm(direct_support ~ q5 + AGE + q4 + q8, 
+                 data = data %>% filter(treat == 0), 
+                 family = binomial("logit"))
+
+# Gender subgroups
+data <- data %>%
+  mutate(gender = case_when(
+    q5 == 1 ~ "Men",
+    q5 == 2 ~ "Women",
+    q5 == 3 ~ "Non-binary"
+  ))
+
+for (grp in c("Men", "Women", "Non-binary")) {
+  cat(grp)
+  print(predict(fit.list, direct.glm = fit.sens,
+        newdata = data %>% filter(gender == grp),
+        newdata.direct = data %>% filter(treat == 0, gender == grp),
+        se.fit = TRUE, avg = TRUE))
+}
+
+# Age subgroups
+data <- data %>%
+  mutate(age_group = case_when(
+    AGE < 40 ~ "Younger",
+    AGE >= 40 & AGE < 60 ~ "Middle",
+    AGE >= 60 & AGE < 70 ~ "Older"
+  ))
+
+for (grp in c("Younger", "Middle", "Older")) {
+  cat(grp)
+  print(predict(fit.list, direct.glm = fit.sens,
+        newdata = data %>% filter(age_group == grp),
+        newdata.direct = data %>% filter(treat == 0, age_group == grp),
+        se.fit = TRUE, avg = TRUE))
+}
+
+#Education subgroups
+data <- data %>%
+  mutate(edu = case_when(
+    q4 <= 2 ~ "HS or less",
+    q4 >= 3 ~ "Higher ed"
+  ))
+
+for (grp in c("HS or less", "Higher ed")) {
+  cat(grp)
+  print(predict(fit.list, direct.glm = fit.sens,
+        newdata = data %>% filter(edu == grp),
+        newdata.direct = data %>% filter(treat == 0, edu == grp),
+        se.fit = TRUE, avg = TRUE))
+}
+
+# Political ideology subgroups
+data <- data %>%
+  mutate(political = case_when(
+    q8 <= 3 ~ "Liberal",
+    q8 == 4 ~ "Center",
+    q8 >= 5 ~ "Conservative"
+  ))
+
+for (grp in c("Liberal", "Center", "Conservative")) {
+  cat(grp)
+  print(predict(fit.list, direct.glm = fit.sens,
+        newdata = data %>% filter(political == grp),
+        newdata.direct = data %>% filter(treat == 0, political == grp),
+        se.fit = TRUE, avg = TRUE))
+}
+```
+
