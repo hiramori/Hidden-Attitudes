@@ -169,12 +169,14 @@ summary(diff.in.means.results)
 fit.list <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
                     treat = "treat", J = 4, method = "ml")
 
-fit.ceiling <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
-                    treat = "treat", J = 4, method = "ml", ceiling = TRUE)
-
 fit.sens <- glm(direct_support ~ q5 + AGE + q4 + q8, 
                  data = data %>% filter(treat == 0), 
                  family = binomial("logit"))
+
+fit.ceiling <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
+                    treat = "treat", J = 4, method = "ml", ceiling = TRUE)
+#fit.ceiling is the model that accounts for the existence of ceiling effects
+
 
 # Gender subgroups
 data <- data %>%
