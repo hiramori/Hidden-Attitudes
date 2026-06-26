@@ -16,7 +16,7 @@ header-includes:
 
 R code for a paper tentatively titled “Hidden Attitudes? Reassessing Support for Same-Sex Marriage in Japan through a List Experiment”
 
-# Initial Data Analysis
+# Data Analysis
 
 ```{r}
 #penalize excessive significant figures
@@ -27,6 +27,9 @@ options(scipen = 10)
 
 #packages used in this analysis
 library(tidyverse)
+library(list)
+library(tableone)
+library(scales)
 ```
 
 ```{r}
@@ -37,34 +40,34 @@ data <- read_csv("data/rawdata.csv", locale = locale(encoding = "CP932"),
 
 ```{r}
 #recode variables
+
 #treatment group vs. control group
 table(data$cellname)
 table(data$cid)
 
 data <- data %>%
-  mutate(group = case_when(
+  mutate(treat = case_when(
     cid >= 1  & cid <= 10 ~ 1,
-    cid >= 11 & cid <= 20 ~ 2,
-    TRUE ~ NA_real_
-  ))
+    cid >= 11 & cid <= 20 ~ 0))
+
+100*prop.table(table(data$cellname, data$treat), margin = 1)
 
 #direct question
 table(data$q10)
 data <- data %>%
   mutate(direct = recode(q10,
                          `1` = 1,
-                         `2` = 0,
-                         .default = NA_real_))
-table(data$q10, data$direct)
+                         `2` = 0))
 
-#rename group
-data <- data %>%
-  mutate(group = factor(group,
-                        levels = c(1, 2),
-                        labels = c("treatment", "control")))
+100*prop.table(table(data$q10, data$direct), margin = 1)
+```
 
-round(prop.table(table(data$cid, data$group), margin = 1) * 100, 1)
+```{r}
+#convert the format
+data <- as.data.frame(data)
+```
 
+```{r}
 #delete satisficers
 table(data$q7_5)
 100*prop.table(table(data$q7_5))
@@ -74,111 +77,46 @@ data <- data %>%
 ```
 
 ```{r}
-#compare the means of the selected items
+#check covariate balance
+vars <- c("q5", "AGE", "q4", "q8")
+table1 <- CreateTableOne(
+     vars = vars,
+     strata = "treat",
+     data = data,
+     factorVars = c("q5", "q4", "q8"))
+print(table1)
 
-data %>%
-  group_by(group) %>%
-  summarise(
-    mean = mean(q9_1fa, na.rm = TRUE),
-    sd = sd(q9_1fa, na.rm = TRUE),
-    n = n()
-    )
-
-diff <- data %>%
-  group_by(group) %>%
-  summarise(mean = mean(q9_1fa, na.rm = TRUE)) %>%
-  pivot_wider(names_from = group, values_from = mean) %>%
-  mutate(diff = (`treatment` - `control`) * 100)
-diff <- diff[[3]]
-```
-
-結果1：5問群（実験群）と4問群（統制群）の差から計算した「実際の」同性婚賛成割合は、`r round(diff, 3)`% である。
-
-```{r}
-avr <- data %>%
-  group_by(group) %>%
-  summarise(mean_direct = mean(direct, na.rm = TRUE)*100)
-pull(avr)
-
-average <- avr[[2, 2]]
-```
-
-結果2：リスト実験で同性婚賛否の設問を見なかった4問群（統制群）において、直接同性婚の賛否を聞いた場合の同性婚賛成割合は`r round(average, 3)`%である。
-
-**結果3：直接聞いた場合と間接的に聞いた場合では、`r round(average-diff, 3)`%差がある（実際よりも賛成割合が過大推定されている）。**
-
-# Main Data Analysis
-
-```{r}
-#packages used in this analysis
-library(list)
-
-#recode the group variable
-data <- data %>%
-  mutate(treat = case_when(
-    group == "control" ~ 0,
-    group == "treatment" ~ 1
-  ))
-
-#convert the format
-data <- as.data.frame(data)
-```
-
-```{r}
-# Direct question estimate
-data <- data %>%
-  mutate(direct_support = case_when(
-    q10 == 1 ~ 1, 
-    q10 == 2 ~ 0,   
-    TRUE ~ NA_real_
-  ))
-
-direct_est <- mean(data$direct_support, na.rm = TRUE)
-direct_n   <- sum(!is.na(data$direct_support))
-direct_se  <- sqrt(direct_est * (1 - direct_est) / direct_n)
-
-cat("Direct estimate:", round(direct_est, 4), 
-    "SE:", round(direct_se, 4), 
-    "N:", direct_n, "\n")
-```
-
-```{r}
-# Check No Design Effects Assumption
+#check design effects
 ict.test(y = data$q9_1fa, treat = data$treat, J = 4)
 
-# Check Ceiling and Floor Effects
+#check ceiling and floor effects
 table(data$q9_1fa[data$treat == 0])
 100*prop.table(table(data$q9_1fa[data$treat == 0]) )
+
 table(data$q9_1fa[data$treat == 1])
 100*prop.table(table(data$q9_1fa[data$treat == 1]))
-
-nls_fit <- ictreg(q9_1fa ~ 1, data = data, treat = "treat", J = 4, method = "nls")
-summary(nls_fit)
 ```
 
 ```{r}
-# Calculate list experiment difference in means
+#calculate list experiment difference in means
 diff.in.means.results <- ictreg(q9_1fa ~ 1, data = data, 
                   treat = "treat", J=4, method = "lm")
-
 summary(diff.in.means.results)
+
+#direct question estimate
+mean(data$direct, na.rm = TRUE)
 ```
 
 ```{r}
-# Setup: fit base models on full sample
+#fit base models on full sample
 fit.list <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
                     treat = "treat", J = 4, method = "ml")
 
-fit.sens <- glm(direct_support ~ q5 + AGE + q4 + q8, 
+fit.sens <- glm(direct ~ q5 + AGE + q4 + q8, 
                  data = data %>% filter(treat == 0), 
                  family = binomial("logit"))
 
-fit.ceiling <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
-                    treat = "treat", J = 4, method = "ml", ceiling = TRUE)
-#fit.ceiling is the model that accounts for the existence of ceiling effects
-
-
-# Gender subgroups
+#gender subgroups
 data <- data %>%
   mutate(gender = case_when(
     q5 == 1 ~ "Men",
@@ -194,7 +132,7 @@ for (grp in c("Men", "Women", "Non-binary")) {
         se.fit = TRUE, avg = TRUE))
 }
 
-# Age subgroups
+#age subgroups
 data <- data %>%
   mutate(age_group = case_when(
     AGE < 40 ~ "Younger",
@@ -210,7 +148,7 @@ for (grp in c("Younger", "Middle", "Older")) {
         se.fit = TRUE, avg = TRUE))
 }
 
-#Education subgroups
+#education subgroups
 data <- data %>%
   mutate(edu = case_when(
     q4 <= 2 ~ "HS or less",
@@ -225,7 +163,7 @@ for (grp in c("HS or less", "Higher ed")) {
         se.fit = TRUE, avg = TRUE))
 }
 
-# Political ideology subgroups
+#political ideology subgroups
 data <- data %>%
   mutate(political = case_when(
     q8 <= 3 ~ "Liberal",
@@ -242,3 +180,105 @@ for (grp in c("Liberal", "Center", "Conservative")) {
 }
 ```
 
+```{r}
+#plot the results
+
+#Code for this figure was developed with assistance from Claude (Anthropic); the underlying analysis and all reported estimates are from the authors' own statistical models
+
+library(tidyverse)
+
+# ---- 1. Data extracted from the analysis output -----------------------------
+
+results <- tribble(
+  ~category,    ~subgroup,        ~list_est, ~list_se, ~direct_est, ~direct_se,
+  "Overall",    "Overall",        0.580,     0.0469,   0.688,       0.0144,
+  "Gender",     "Men",            0.505,     0.0610,   0.613,       0.0221,
+  "Gender",     "Women",          0.650,     0.0605,   0.758,       0.0190,
+  "Gender",     "Non-binary",     0.745,     0.1094,   0.882,       0.0253,
+  "Age",        "Younger (20-39)",  0.562,     0.0722,   0.730,       0.0216,
+  "Age",        "Middle (40-59)", 0.584,     0.0420,   0.676,       0.0153,
+  "Age",        "Older (60-69)",  0.596,     0.0679,   0.643,       0.0252,
+  "Education",  "High school or less",     0.647,     0.0658,   0.708,       0.0237,
+  "Education",  "Junior college or above",      0.552,     0.0495,   0.679,       0.0168,
+  "Ideology",   "Liberal",        0.560,     0.0789,   0.760,       0.0250,
+  "Ideology",   "Center",         0.594,     0.0440,   0.717,       0.0162,
+  "Ideology",   "Conservative",   0.571,     0.0593,   0.643,       0.0199
+)
+
+# ---- 2. Reshape to long format and compute 95% CIs in percentage points ----
+
+plot_data <- results %>%
+  pivot_longer(
+    cols = c(list_est, list_se, direct_est, direct_se),
+    names_to = c("measure", ".value"),
+    names_pattern = "(list|direct)_(est|se)"
+  ) %>%
+  mutate(
+    measure = recode(measure, list = "List experiment", direct = "Direct question"),
+    measure = factor(measure, levels = c("List experiment", "Direct question")),
+    est = est * 100,
+    se  = se * 100,
+    ci_low  = est - 1.96 * se,
+    ci_high = est + 1.96 * se,
+    category = factor(category,
+                       levels = c("Overall", "Gender", "Age", "Education", "Ideology")),
+    subgroup = fct_inorder(subgroup) %>% fct_rev()
+  )
+
+# ---- 3. Plot: vertical dot-and-error-bar plot, percent y-axis --------------
+
+p <- plot_data %>%
+  ggplot(aes(x = est, y = subgroup, shape = measure)) +
+  geom_errorbar(
+    aes(xmin = ci_low, xmax = ci_high),
+    position = position_dodge(width = 0.5),
+    width = 0.15, linewidth = 0.4, color = "black"
+  ) +
+  geom_point(
+    position = position_dodge(width = 0.5),
+    size = 2.2, fill = "white", color = "black", stroke = 0.7
+  ) +
+  geom_text(
+    aes(label = sprintf("%.1f%%", est)),
+    position = position_dodge(width = 0.5),
+    vjust = -1.1, size = 2.7,
+    family = "sans",
+    show.legend = FALSE
+  ) +
+  facet_grid(category ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_shape_manual(values = c("List experiment" = 16, "Direct question" = 1)) +
+  scale_x_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, 20),
+    labels = paste0(seq(0, 100, 20), "%"),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  labs(
+    x = "Estimated support (%)",
+    y = NULL,
+    shape = NULL,
+    title = "Figure 1. Support for same-sex marriage in Japan: list experiment vs. direct question",
+    caption = "Note. Error bars indicate 95% confidence intervals."
+  ) +
+  theme_bw(base_size = 10, base_family = "sans") +
+  theme(
+    strip.placement = "outside",
+    strip.background = element_blank(),
+    strip.text.y.left = element_text(angle = 0, size = 9, face = "plain"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
+    panel.spacing = unit(0.4, "lines"),
+    panel.border = element_rect(color = "grey40", linewidth = 0.4),
+    legend.position = "bottom",
+    legend.key = element_blank(),
+    legend.text = element_text(size = 9),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 8, face = "italic", color = "black", hjust = 0)
+  )
+
+p
+
+# ---- 4. Save -------------------------------------------------------------------
+ggsave("list_vs_direct.png", p, path = "figure", width = 8, height = 9, dpi = 320)
+```
