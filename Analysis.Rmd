@@ -104,7 +104,16 @@ diff.in.means.results <- ictreg(q9_1fa ~ 1, data = data,
 summary(diff.in.means.results)
 
 #direct question estimate
-mean(data$direct, na.rm = TRUE)
+p <- mean(data$direct, na.rm = TRUE)
+
+#sample size
+n <- sum(!is.na(data$direct))
+
+#standard error
+se <- sqrt(p * (1 - p) / n)
+
+p
+se
 ```
 
 ```{r}
