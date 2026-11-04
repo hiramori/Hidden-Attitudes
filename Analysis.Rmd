@@ -30,9 +30,10 @@ library(tidyverse)
 library(list)
 library(tableone)
 library(scales)
+library(patchwork)
 
 #set seed for reproducibility
-set.seed(2026)
+set.seed(12345)
 ```
 
 ```{r}
@@ -120,77 +121,59 @@ se
 ```
 
 ```{r}
-#fit base models on full sample
-fit.list <- ictreg(q9_1fa ~ q5 + AGE + q4 + q8, data = data, 
-                    treat = "treat", J = 4, method = "ml")
-
-fit.sens <- glm(direct ~ q5 + AGE + q4 + q8, 
-                 data = data %>% filter(treat == 0), 
-                 family = binomial("logit"))
-
-#gender subgroups
+#subgroup analysis
 data <- data %>%
-  mutate(gender = case_when(
-    q5 == 1 ~ "Men",
-    q5 == 2 ~ "Women",
-    q5 == 3 ~ "Non-binary"
-  ))
+  mutate(
+    gender    = case_when(q5 == 1 ~ "Men", q5 == 2 ~ "Women", q5 == 3 ~ "NonBinary"),
+    age_group = case_when(AGE < 40 ~ "Younger", AGE < 60 ~ "Middle", AGE < 70 ~ "Older"),
+    edu       = case_when(q4 <= 4 ~ "LessBA", q4 %in% 5:6 ~ "BAorAbove"),  # q4 == 7 は NA
+    political = case_when(q8 <= 3 ~ "Liberal", q8 == 4 ~ "Center", q8 >= 5 ~ "Conservative")
+  )
 
-for (grp in c("Men", "Women", "Non-binary")) {
-  cat(grp)
-  print(predict(fit.list, direct.glm = fit.sens,
-        newdata = data %>% filter(gender == grp),
-        newdata.direct = data %>% filter(treat == 0, gender == grp),
-        se.fit = TRUE, avg = TRUE))
+est_ie <- function(d, B = 2000, boot = TRUE, exact_direct = FALSE) {
+  y1 <- d$q9_1fa[d$treat == 1]; y0 <- d$q9_1fa[d$treat == 0]
+  dd <- d$direct[d$treat == 0]
+  p  <- mean(dd); se_d <- sqrt(p * (1 - p) / length(dd))
+  l  <- mean(y1) - mean(y0)
+  se_l <- sqrt(var(y1) / length(y1) + var(y0) / length(y0))
+  diff <- l - p
+  se_diff <- sqrt(se_l^2 + se_d^2)
+
+  # 直接質問のCI
+  d_ci <- if (exact_direct) binom.test(sum(dd), length(dd))$conf.int
+          else c(p - 1.96 * se_d, p + 1.96 * se_d)
+
+  se_boot <- NA_real_
+  if (boot) {
+    bs <- replicate(B, {
+      b <- d[sample(nrow(d), replace = TRUE), ]
+      mean(b$q9_1fa[b$treat == 1]) - mean(b$q9_1fa[b$treat == 0]) -
+        mean(b$direct[b$treat == 0])
+    })
+    se_boot <- sd(bs, na.rm = TRUE)
+  }
+  tibble(n_direct = length(dd), direct_est = p, direct_se = se_d,
+         direct_lo = d_ci[1], direct_hi = d_ci[2],
+         n_list = nrow(d), list_est = l, list_se = se_l,
+         list_lo = l - 1.96 * se_l, list_hi = l + 1.96 * se_l,
+         diff = diff, diff_se = se_diff, diff_se_boot = se_boot,
+         p_value = 2 * pnorm(-abs(diff / se_diff)))
 }
 
-#age subgroups
-data <- data %>%
-  mutate(age_group = case_when(
-    AGE < 40 ~ "Younger",
-    AGE >= 40 & AGE < 60 ~ "Middle",
-    AGE >= 60 & AGE < 70 ~ "Older"
-  ))
-
-for (grp in c("Younger", "Middle", "Older")) {
-  cat(grp)
-  print(predict(fit.list, direct.glm = fit.sens,
-        newdata = data %>% filter(age_group == grp),
-        newdata.direct = data %>% filter(treat == 0, age_group == grp),
-        se.fit = TRUE, avg = TRUE))
-}
-
-#education subgroups
-data <- data %>%
-  mutate(edu = case_when(
-    q4 <= 4 ~ "Less than BA",
-    q4 >= 5 & q4 < 7 ~ "BA or above",
-    q4 == 7 ~ "Other"
-  ))
-
-for (grp in c("Less than BA", "BA or above", "Other")) {
-  cat(grp)
-  print(predict(fit.list, direct.glm = fit.sens,
-        newdata = data %>% filter(edu == grp),
-        newdata.direct = data %>% filter(treat == 0, edu == grp),
-        se.fit = TRUE, avg = TRUE))
-}
-
-#political ideology subgroups
-data <- data %>%
-  mutate(political = case_when(
-    q8 <= 3 ~ "Liberal",
-    q8 == 4 ~ "Center",
-    q8 >= 5 ~ "Conservative"
-  ))
-
-for (grp in c("Liberal", "Center", "Conservative")) {
-  cat(grp)
-  print(predict(fit.list, direct.glm = fit.sens,
-        newdata = data %>% filter(political == grp),
-        newdata.direct = data %>% filter(treat == 0, political == grp),
-        se.fit = TRUE, avg = TRUE))
-}
+res <- bind_rows(
+  Overall      = est_ie(data),
+  Men          = est_ie(filter(data, gender == "Men")),
+  Women        = est_ie(filter(data, gender == "Women")),
+  Younger      = est_ie(filter(data, age_group == "Younger")),
+  Middle       = est_ie(filter(data, age_group == "Middle")),
+  Older        = est_ie(filter(data, age_group == "Older")),
+  LessBA       = est_ie(filter(data, edu == "LessBA")),
+  BAorAbove    = est_ie(filter(data, edu == "BAorAbove")),
+  Liberal      = est_ie(filter(data, political == "Liberal")),
+  Center       = est_ie(filter(data, political == "Center")),
+  Conservative = est_ie(filter(data, political == "Conservative")),
+  .id = "subgroup")
+res
 ```
 
 ```{r}
@@ -198,100 +181,101 @@ for (grp in c("Liberal", "Center", "Conservative")) {
 
 #Code for this figure was developed with assistance from Claude (Anthropic); the underlying analysis and all reported estimates are from the authors' own statistical models
 
-library(tidyverse)
-
-# ---- 1. Data extracted from the analysis output -----------------------------
-
-results <- tribble(
-  ~category,    ~subgroup,        ~list_est, ~list_se, ~direct_est, ~direct_se,
-  "Overall",    "Overall",        0.580,     0.0469,   0.688,       0.0150,
-  "Gender",     "Men",            0.507,     0.0613,   0.613,       0.0223,
-  "Gender",     "Women",          0.649,     0.0603,   0.758,       0.0191,
-  "Gender",     "Non-binary",     0.743,     0.1101,   0.881,       0.0256,
-  "Age",        "Younger (20-39)",  0.562,     0.0718,   0.730,       0.0214,
-  "Age",        "Middle (40-59)", 0.583,     0.0424,   0.676,       0.0153,
-  "Age",        "Older (60-69)",  0.597,     0.0677,   0.643,       0.0255,
-  "Education",  "Less than BA",     0.635,     0.0536,   0.711,       0.0185,
-  "Education",  "BA or above",      0.517,     0.0602,   0.659,       0.0205,
-  "Ideology",   "Liberal",        0.560,     0.0786,   0.760,       0.0251,
-  "Ideology",   "Center",         0.594,     0.0451,   0.717,       0.0162,
-  "Ideology",   "Conservative",   0.572,     0.0603,   0.643,       0.0199
-)
-
-# ---- 2. Reshape to long format and compute 95% CIs in percentage points ----
-
-plot_data <- results %>%
-  pivot_longer(
-    cols = c(list_est, list_se, direct_est, direct_se),
-    names_to = c("measure", ".value"),
-    names_pattern = "(list|direct)_(est|se)"
-  ) %>%
+# ---- 1. 右パネル用データ(差と95%CI、単位は pp) ---------------------------
+diff_data <- res %>%
+  left_join(lookup, by = "subgroup") %>%
   mutate(
-    measure = recode(measure, list = "List experiment", direct = "Direct question"),
-    measure = factor(measure, levels = c("List experiment", "Direct question")),
-    est = est * 100,
-    se  = se * 100,
-    ci_low  = est - 1.96 * se,
-    ci_high = est + 1.96 * se,
+    p_value  = 2 * pnorm(-abs(diff / diff_se)),
+    stars    = case_when(p_value < .001 ~ "***", p_value < .01 ~ "**",
+                         p_value < .05 ~ "*", TRUE ~ ""),
+    est      = diff * 100,
+    lo       = (diff - 1.96 * diff_se) * 100,
+    hi       = (diff + 1.96 * diff_se) * 100,
     category = factor(category,
-                       levels = c("Overall", "Gender", "Age", "Education", "Ideology")),
-    subgroup = fct_inorder(subgroup) %>% fct_rev()
+                      levels = c("Overall", "Gender", "Age", "Education", "Ideology")),
+    label    = factor(label, levels = levels(plot_data$label))   # 左と同じ並び
   )
 
-# ---- 3. Plot: vertical dot-and-error-bar plot, percent y-axis --------------
-
-p <- plot_data %>%
-  ggplot(aes(x = est, y = subgroup, shape = measure)) +
-  geom_errorbar(
-    aes(xmin = ci_low, xmax = ci_high),
-    position = position_dodge(width = 0.5),
-    width = 0.15, linewidth = 0.4, color = "black"
-  ) +
-  geom_point(
-    position = position_dodge(width = 0.5),
-    size = 2.2, fill = "white", color = "black", stroke = 0.7
-  ) +
-  geom_text(
-    aes(label = sprintf("%.1f%%", est)),
-    position = position_dodge(width = 0.5),
-    vjust = -1.1, size = 2.7,
-    family = "sans",
-    show.legend = FALSE
-  ) +
-  facet_grid(category ~ ., scales = "free_y", space = "free_y", switch = "y") +
-  scale_shape_manual(values = c("List experiment" = 16, "Direct question" = 1)) +
-  scale_x_continuous(
-    limits = c(0, 100),
-    breaks = seq(0, 100, 20),
-    labels = paste0(seq(0, 100, 20), "%"),
-    expand = expansion(mult = c(0, 0.05))
-  ) +
-  labs(
-    x = "Estimated support (%)",
-    y = NULL,
-    shape = NULL,
-    title = "Figure 1. Support for same-sex marriage in Japan: list experiment vs. direct question",
-    caption = "Note. Error bars indicate 95% confidence intervals."
-  ) +
-  theme_bw(base_size = 10, base_family = "sans") +
+# ---- 2. 共通のテーマ -----------------------------------------------------
+base_theme <- theme_bw(base_size = 10, base_family = "sans") +
   theme(
-    strip.placement = "outside",
-    strip.background = element_blank(),
-    strip.text.y.left = element_text(angle = 0, size = 9, face = "plain"),
-    panel.grid.minor = element_blank(),
+    panel.grid.minor   = element_blank(),
     panel.grid.major.y = element_blank(),
     panel.grid.major.x = element_line(color = "grey85", linewidth = 0.3),
-    panel.spacing = unit(0.4, "lines"),
-    panel.border = element_rect(color = "grey40", linewidth = 0.4),
-    legend.position = "bottom",
-    legend.key = element_blank(),
-    legend.text = element_text(size = 9),
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
-    plot.caption = element_text(size = 8, face = "italic", color = "black", hjust = 0)
+    panel.spacing      = unit(0.4, "lines"),
+    panel.border       = element_rect(color = "grey40", linewidth = 0.4),
+    legend.key         = element_blank(),
+    legend.text        = element_text(size = 9)
   )
+
+# ---- 3. 左:direct vs. list ----------------------------------------------
+plot_data <- plot_data %>%
+  mutate(measure = factor(measure, levels = c("Direct question", "List experiment")))
+p_left <- plot_data %>%
+  ggplot(aes(x = est, y = label, shape = measure)) +
+  geom_errorbar(aes(xmin = lo, xmax = hi), position = pd,
+                width = 0.15, linewidth = 0.4, color = "black",
+                orientation = "y") +
+  geom_point(position = pd, size = 2.2, fill = "white",
+             color = "black", stroke = 0.7) +
+  geom_text(aes(x = hi, label = sprintf("%.1f%%", est)), position = pd,
+            hjust = -0.15, size = 2.7, family = "sans", show.legend = FALSE) +
+  facet_grid(category ~ ., scales = "free_y", space = "free_y", switch = "y") +
+scale_shape_manual(
+    values = c("List experiment" = 16, "Direct question" = 1),
+    breaks = c("Direct question", "List experiment")
+  ) +
+  scale_x_continuous(breaks = seq(0, 100, 20),
+                     labels = paste0(seq(0, 100, 20), "%"),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_y_discrete(expand = expansion(add = 0.8)) +
+  coord_cartesian(xlim = c(0, 105)) +
+  labs(x = "Estimated support (%)", y = NULL, shape = NULL) +
+  base_theme +
+  theme(strip.placement = "outside",
+        strip.background = element_blank(),
+        strip.text.y.left = element_text(angle = 0, size = 9, face = "plain"))
+
+# ---- 4. 右:差(list − direct) -------------------------------------------
+p_right <- diff_data %>%
+  ggplot(aes(x = est, y = label)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey40", linewidth = 0.4) +
+  geom_errorbar(aes(xmin = lo, xmax = hi), width = 0.15, linewidth = 0.4,
+                color = "black", orientation = "y") +
+  geom_point(shape = 15, size = 2.2, color = "black") +
+  geom_text(aes(x = hi, label = sprintf("%.1f%s", est, stars)),
+            hjust = -0.15, size = 2.7, family = "sans") +
+  facet_grid(category ~ ., scales = "free_y", space = "free_y") +
+  scale_x_continuous(breaks = seq(-30, 30, 10)) +
+  scale_y_discrete(expand = expansion(add = 0.8)) +
+  coord_cartesian(xlim = c(-35, 35)) +
+  labs(x = "Difference: list \u2212 direct (pp)", y = NULL) +
+  base_theme +
+  theme(strip.text = element_blank(),
+        strip.background = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+
+# ---- 5. 結合 -------------------------------------------------------------
+p <- (p_left + p_right) +
+  plot_layout(widths = c(2, 1), guides = "collect") +
+  plot_annotation(
+    title = "Figure 1. Support for same-sex marriage in Japan:\nDirect question vs. list experiment",
+    caption = paste0(
+      "Note. List-experiment estimates are differences in mean item counts between treatment and control groups (N = 1,928);\n",
+      "direct-question estimates are the proportion of support in the control group (n = 958).\n",
+      "Error bars indicate 95% confidence intervals. Respondents with 'other' education (n = 2) are excluded from the education panel.\n",
+      "Non-binary respondents (n = 9) are included in the overall estimate but not shown separately (see text).\n",
+      "Right panel: difference (list \u2212 direct) in percentage points; SE = sqrt(SE_list^2 + SE_direct^2).\n",
+      "* p < .05, ** p < .01, *** p < .001."),
+    theme = theme(
+      plot.title   = element_text(size = 10, face = "bold", hjust = 0.5),
+      plot.caption = element_text(size = 8, face = "italic", color = "black", hjust = 0)
+    )
+  ) &
+  theme(legend.position = "bottom")
 
 p
 
-# ---- 4. Save -------------------------------------------------------------------
-ggsave("list_vs_direct.png", p, path = "figure", width = 8, height = 9, dpi = 320)
+ggsave("direct_vs_list.png", p, path = "figure", width = 11, height = 9, dpi = 320)
 ```
