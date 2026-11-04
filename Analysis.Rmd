@@ -160,11 +160,11 @@ for (grp in c("Younger", "Middle", "Older")) {
 #education subgroups
 data <- data %>%
   mutate(edu = case_when(
-    q4 <= 2 ~ "HS or less",
-    q4 >= 3 ~ "Higher ed"
+    q4 <= 4 ~ "Less than BA",
+    q4 >= 5 ~ "BA or above"
   ))
 
-for (grp in c("HS or less", "Higher ed")) {
+for (grp in c("Less than BA", "BA or above")) {
   cat(grp)
   print(predict(fit.list, direct.glm = fit.sens,
         newdata = data %>% filter(edu == grp),
@@ -207,8 +207,8 @@ results <- tribble(
   "Age",        "Younger (20-39)",  0.562,     0.0722,   0.730,       0.0216,
   "Age",        "Middle (40-59)", 0.584,     0.0420,   0.676,       0.0153,
   "Age",        "Older (60-69)",  0.596,     0.0679,   0.643,       0.0252,
-  "Education",  "High school or less",     0.647,     0.0658,   0.708,       0.0237,
-  "Education",  "Junior college or above",      0.552,     0.0495,   0.679,       0.0168,
+  "Education",  "Less than BA",     0.634,     0.0530,   0.711,       0.0186,
+  "Education",  "BA or above",      0.516,     0.0603,   0.659,       0.0207,
   "Ideology",   "Liberal",        0.560,     0.0789,   0.760,       0.0250,
   "Ideology",   "Center",         0.594,     0.0440,   0.717,       0.0162,
   "Ideology",   "Conservative",   0.571,     0.0593,   0.643,       0.0199
