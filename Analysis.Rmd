@@ -231,7 +231,7 @@ direct_results <- bind_rows(direct_overall, direct_gender, direct_age,
 #Code for this figure was developed with assistance from Claude (Anthropic); the underlying analysis and all reported estimates are from the authors' own statistical models
 
 #bootstrap SE for the difference (list - direct)
-boot_diff <- function(d, B = 2000) {
+boot_diff <- function(d, B = 5000) {
   d1 <- d[d$treat == 1, ]
   d0 <- d[d$treat == 0, ]
   replicate(B, {
